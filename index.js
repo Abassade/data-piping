@@ -28,7 +28,7 @@ app.get('/', (req, res)=> {
 // endpoint to save csv to elasticsearch
 app.get('/save', (req, res) =>{
 
-    const csvFile = 'abs.csv';
+    const csvFile = '/uploads/file.csv';
     csv()
     .fromFile(csvFile)
     .then((jsonObj)=>{
