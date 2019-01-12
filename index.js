@@ -1,5 +1,6 @@
 const express = require('express');
 const multer = require('multer');
+const fs = require('fs')
 const bodyParser = require('body-parser');
 const client=require('./connection');
 
@@ -10,6 +11,7 @@ const app = express();
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({extended: true}));
 
+//setting multer storage
 const storage = multer.diskStorage({
     destination: function (req, file, cb) {
       cb(null, 'uploads')
@@ -17,7 +19,7 @@ const storage = multer.diskStorage({
     filename: function (req, file, cb) {
       cb(null, file.fieldname + '.csv');
     }
-  })
+  });
 
 const upload = multer({ storage: storage });
 
@@ -26,40 +28,28 @@ app.get('/', (req, res)=> {
 });
 
 // endpoint to save csv to elasticsearch
-app.get('/save', (req, res) =>{
+app.get('/save/:esindex/:estype', (req, res) =>{
 
-    const csvFile = '/uploads/file.csv';
+    const {params} =req;
+    const {esindex, estype} = params;
+
+    let csvFilePath = 'abs.csv'
+    let path = __dirname+'/uploads/file.csv';
+    try {
+        if (fs.existsSync(path)) {
+          csvFilePath = path
+        }
+      } catch(err) {
+        console.error(err)
+      }
+   
     csv()
-    .fromFile(csvFile)
+    .fromFile(csvFilePath)
     .then((jsonObj)=>{
 
-        // for( i in jsonObj){
-        //     //console.log(jsonObj[i]);
-
-        //     client.index({  
-        //                 index: 'morife',
-        //                 id: i.toString(),
-        //                 type: 'data',
-        //                 body: jsonObj[i]
-        //                 }, (err,resp,status) =>{
-        //                   console.log(resp);
-        //             });
-
-        // }
-
-       //console.log(Object.assign({}, jsonObj));
        const realJson = Object.assign({}, jsonObj);
 
-       client.bulk({
-           body: realJson
-        },
-        (err,response)=>{
-            if(err)
-                return console.log('Error', err);
-            else
-                return console.log('Response', response);
-        }
-       );
+       bulkIndex(esindex, estype, jsonObj);
 
     });
 
@@ -78,13 +68,63 @@ app.post('/upload', upload.single('file'), (req, res) =>{
     .then((jsonObj)=>{
         const realJson = Object.assign({}, jsonObj);
         console.log(realJson);
-        //console.log(typeof(jsonObj));
         });
         res.send('We are life');
 
 });
+  //handling error for bad route request
+app.use( (req, res, next)=>{
+    const error = new Error('Not Found');
+    error.status = 404;
+    next(error);
+    });
+
+    app.use( (error, req, res, next)=>{
+        res.status(error.status || 500);
+        res.json({
+            error:{
+                status: error.status,
+                message: error.message
+            }
+        });
+        });
+
+const bulkIndex = (index, type, data) =>{
+    let bulkBody = [];
+  
+    data.forEach(item => {
+      //  console.log(item);
+      bulkBody.push({
+        index: {
+          _index: index,
+          _type: type,
+          _id: item.fName
+        }
+      });
+      //console.log(index, type, item.fName);
+  
+      bulkBody.push(item);
+    });
+  
+    client.bulk({body: bulkBody})
+    .then(response => {
+      console.log('I am here after bulk');
+      let errorCount = 0;
+      response.items.forEach(item => {
+        if (item.index && item.index.error) {
+          console.log(++errorCount, item.index.error);
+        }
+      });
+      const mes_response = `Error:
+       ${response.errors}\nTime Spent:
+        ${response.took}ms\nSuccessfully indexed ${data.length - errorCount}
+        out of ${data.length} items`
+      console.log(mes_response);
+    })
+    .catch(console.err);
+  };
 
 
-app.listen(3000, ()=>{
-    console.log('App is listening on port 3000');
+app.listen(4000, ()=>{
+    console.log('App is listening on port 4000');
 });
